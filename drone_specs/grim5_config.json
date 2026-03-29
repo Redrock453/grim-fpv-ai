@@ -1,0 +1,26 @@
+{
+  "name": "ГРІМ-5",
+  "frame": "iFlight XL5 Pro 5\"",
+  "weight_g": 865,
+  "motors": {
+    "model": "T-Motor U8 Pro",
+    "kv": 2000,
+    "max_current_a": 45
+  },
+  "esc": {
+    "model": "40A BLheli_32",
+    "voltage_6s": true
+  },
+  "battery": {
+    "cells": 6,
+    "capacity_mah": 850,
+    "c_rating": 75,
+    "wh": 18.87,
+    "nominal_v": 22.2
+  },
+  "propellers": "5045 Carbon",
+  "thrust_kg": 4.2,
+  "twr": 4.86,
+  "tx_power_mw": 500,
+  "tx_protocol": "ExpressLRS 2.4GHz"
+}
