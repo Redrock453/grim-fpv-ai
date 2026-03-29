@@ -7,13 +7,14 @@
 ```
 grim-fpv-ai/
 ├── core/
-│   ├── data_contracts.py   # Все типы данных (Pose3D, DetectedObject, WorldModel)
-│   ├── state_machine.py    # HFSM с приоритетом SAFETY > NAVIGATION
-│   ├── event_bus.py        # Asyncio Pub/Sub для модулей
-│   └── world_model.py      # Объединяет SLAM, Perception, команды полёта
+│   ├── data_contracts.py      # Все типы данных (Pose3D, DetectedObject, WorldModel)
+│   ├── state_machine.py       # HFSM с приоритетом SAFETY > NAVIGATION
+│   ├── event_bus.py           # Asyncio Pub/Sub для модулей
+│   ├── world_model.py         # Объединяет SLAM, Perception, команды полёта
+│   └── mavlink_client.py      # MAVLink transport layer
 ├── slam/
-│   ├── sensor_sync.py      # Синхронизация IMU и Camera
-│   └── openvins_bridge.py  # Мост к OpenVINS
+│   ├── sensor_sync.py         # Синхронизация IMU и Camera
+│   └── openvins_bridge.py     # Мост к OpenVINS
 └── README.md
 ```
 
@@ -94,6 +95,18 @@ SensorSync → OpenVINSBridge → OpenVINS API
 **Критично**: это единственное место где все данные изолированы от друг друга.
 Остальные модули знают только про `data_contracts`.
 
+### 7. mavlink_client.py — MAVLink transport
+
+**Поддерживаемые команды**:
+- `takeoff`, `land`, `return_to_home`
+- `set_position` (точечное позиционирование)
+- `set_velocity` (скорость)
+
+**Особенности**:
+- Retransmission (3 попытки)
+- ENU → NED conversion (OpenVINS возвращает ENU, MAVLink ожидает NED)
+- Coordinate frames validation
+
 ## Таблица решений
 
 | Ситуация | State | Действие |
@@ -113,9 +126,10 @@ SensorSync → OpenVINSBridge → OpenVINS API
 - [x] `slam/sensor_sync.py`
 - [x] `slam/openvins_bridge.py`
 - [x] `core/world_model.py`
+- [x] `core/mavlink_client.py`
 - [ ] `perception/` — объектное распознавание (ByteTrack + YOLO)
-- [ ] `core/mavlink_client.py` — MAVLink transport
+- [ ] `main.py` — точка входа для запуска всей системы
 
 ## Статус
 
-✅ **v1.3** — Добавлен world_model.py как вершина пирамиды данных
+✅ **v1.4** — Добавлен mavlink_client.py с MAVLink transport
