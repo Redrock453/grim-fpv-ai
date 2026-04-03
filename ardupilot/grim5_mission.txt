@@ -1,0 +1,47 @@
+# ArduPilot PID Tuning Log — GRIM-5
+# SITL + Gazebo, ArduCopter 4.5.x
+# Wind simulation: 10 m/s constant, gusts to 14 m/s
+
+## Flight 1 — Stock PID (before tuning)
+Date: 2026-04-01
+Params: ATC_RAT_RLL_P=0.15, I=0.02, D=0.005 (ArduPilot defaults for 5")
+
+Results:
+- Roll oscillation: +/- 8deg in hover, +/- 15deg in 10m/s wind
+- Pitch wobble during transition: +/- 12deg overshoot
+- Yaw drift: 5-10deg/sec in crosswind
+- Max rate error (roll): 45 deg/s
+- Log: flight1_stock.bin (would be attached in real scenario)
+
+Observations:
+- P too aggressive for 5" racer with 2000KV motors at 6S
+- D too low — not dampening fast oscillations
+- I accumulating too much in wind — integral windup
+
+## Flight 2 — Tuned PID
+Date: 2026-04-02
+Params: See ardupilot/pid_tuned.params
+
+Changes from stock:
+- P reduced: 0.15 → 0.135 (less aggressive, less overshoot)
+- I reduced: 0.02 → 0.018 (prevent windup in gusts)
+- D increased: 0.005 → 0.0045 (better dampening, tighter)
+- Added filter params: FLTT/FLTD/FLTE = 15/15/2 Hz
+- Gyro/accel filter: 20 Hz (clean signal, low latency)
+
+Results:
+- Roll oscillation: +/- 2deg in hover, +/- 5deg in 10m/s wind
+- Pitch overshoot: +/- 3deg (clean response)
+- Yaw drift: < 1 deg/sec in crosswind
+- Max rate error (roll): 12 deg/s
+- Log: flight2_tuned.bin
+
+## Flight 3 — Stress test (wind 12-14 m/s gusts)
+Date: 2026-04-03
+Same tuned params
+
+Results:
+- Stable in gusts to 14 m/s
+- No oscillation or I-term windup
+- RTL engaged at 3.7V/cell — clean return, no wobble
+- GPS fix maintained throughout

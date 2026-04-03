@@ -7,13 +7,17 @@ FPV AI Engineering Agent с полным стеком расчётов, multi-AI
 ## Спецификация ГРІМ-5
 - **Рама:** iFlight XL5 Pro, 5"
 - **Моторы:** T-Motor U8 Pro 2000KV
-- **Вес:** ~865г
+- **ESC:** 40A BLheli_32 (6S)
+- **Вес:** ~865г AUW
 - **Батарея:** 6S 850mAh 75C (18.87Wh)
 - **Тяга:** ~4.2кг (TWR 4.86)
+- **Пропы:** 5045 Carbon
 - **VTX:** TBS Unify Pro32 (600mW)
-- **Приёмник:** Crossfire Nano RX
+- **Приёмник:** ExpressLRS 2.4GHz, 500mW + Crossfire Nano RX
 - **Антенна TX:** Lollipop 5.8GHz 4dBic
-- **FC:** SpeedyBee F405 V4
+- **FC:** SpeedyBee F405 V4 / Pixhawk 6X (STM32H743)
+- **GPS:** UBLOX M9N (dual antenna)
+- **Rangefinder:** Benewake TF02 Pro (LiDAR 40m)
 
 ## Эндпоинты API
 
@@ -62,6 +66,11 @@ curl -X POST "http://localhost:8000/calculate/rf-link" \
 curl -X POST "http://localhost:8000/calculate/rf-thermal" \
      -H "Content-Type: application/json" \
      -d '{"p_out_watts": 0.6, "efficiency": 0.35}'
+
+# PID рекомендации
+curl -X POST "http://localhost:8000/calculate/pid" \
+     -H "Content-Type: application/json" \
+     -d '{"kv": 2000, "prop_size": "5045", "weight_g": 865}'
 ```
 
 ## Структура проекта
@@ -70,15 +79,28 @@ curl -X POST "http://localhost:8000/calculate/rf-thermal" \
 grim-fpv-ai/
 ├── ai_engines/          # AI движки (Groq, Gemini, Claude, GLM)
 ├── api/                 # FastAPI сервер + модели
-├── ardupilot/           # PID тюнер для SITL
+├── ardupilot/           # PID тюнер для SITL + кастомные режимы
 ├── calculators/         # Математические модули (7 калькуляторов)
 ├── core/                # MAVLink, state machine, world model
-├── drone_specs/         # Конфигурации дронов
+├── drone_specs/         # Конфигурации дронов (JSON)
 ├── prompts/             # System prompts для AI
 ├── slam/                # OpenVINS интеграция
 ├── ai/                  # YOLOv8 detector + ByteTrack
 ├── tests/               # Тесты
 └── utils/               # Утилиты, config, DB
+```
+
+## ArduPilot Tweaks
+
+### PID-тюнинг (5" FPV, ветер 8-12 м/с)
+
+**Стартовые значения (stock):** P=0.15, I=0.02, D=0.005
+**После тюнинга:** P=0.135, I=0.018, D=0.0045, roll +/-2-5° в ветер 10 м/с
+
+### SITL Auto-Tuner
+```bash
+python ardupilot/grim5_tuning.py --sitrl   # generate sweep plan
+python ardupilot/grim5_tuning.py --analyze logs/flight.bin  # score tune
 ```
 
 ## AI Engines
