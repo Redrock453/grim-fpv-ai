@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 import sys
+import logging
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -14,7 +16,16 @@ from api.models import (
     RFThermalRequest, ThermalRequest, RangeRequest, PIDRequest, MultiAIRequest
 )
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="GRIM-5 FPV AI Engineering API", version="2.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
