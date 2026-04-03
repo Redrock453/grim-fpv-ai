@@ -10,6 +10,9 @@ from core.data_contracts import (
     FlightMode, SafetyMode, WorldModel, SafetyStatus,
     SystemEvent, FlightCommand
 )
+from core.terminal_guidance import (
+    TerminalGuidanceController, GuidanceConfig, GuidanceMode
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +140,18 @@ class TrackState(State):
     async def evaluate_transition(self, world: WorldModel) -> Optional[State]:
         target = self._find_target(world)
         if not target:
-            # GLM: AVOID как Interrupt возвращает нас сюда
-            # цель пропала → SEARCH_LAST_KNOWN
             return SearchLastKnownState()
+
+        # Target in engagement range → switch to TERMINAL_GUIDANCE
+        if hasattr(target, 'range_m') and target.range_m:
+            guidance_ctrl = TerminalGuidanceController()
+            engagement_range = guidance_ctrl._get_engagement_range(
+                getattr(target, 'class_id', 0)
+            )
+            if target.range_m <= engagement_range:
+                logger.info(f"[FSM] Target at {target.range_m:.0f}m — ENGAGE")
+                return TerminalGuidanceState(target_id=self.target_id)
+
         return None
 
     def _find_target(self, world: WorldModel):
@@ -175,6 +187,84 @@ class ReturnState(State):
     async def evaluate_transition(self, world: WorldModel) -> Optional[State]:
         # TODO: проверка что добрались домой
         return None
+
+
+# ─────────────────────────────────────────────
+# TERMINAL GUIDANCE STATE — Autonomous Target Intercept
+# ─────────────────────────────────────────────
+
+class TerminalGuidanceState(State):
+    """
+    Autonomous terminal guidance — visual-only, GPS-free, EW-resistant.
+
+    Pipeline: ByteTrack → Range/Bearing Estimation → PN/Pursuit/PIP → MAVLink
+
+    Target acquisition:
+      Vehicles: 300-400m (bbox > 10x10 px)
+      Personnel: 120-200m (bbox > 10x10 px)
+    """
+    def __init__(self, target_id: int = -1):
+        super().__init__("TERMINAL_GUIDANCE")
+        self.target_id = target_id
+        self._guidance = TerminalGuidanceController(
+            GuidanceConfig(mode=GuidanceMode.PROPORTIONAL_NAV)
+        )
+
+    async def on_enter(self, world: WorldModel) -> None:
+        await super().on_enter(world)
+        logger.warning("[FSM] *** TERMINAL GUIDANCE ENGAGED ***")
+
+    async def execute(self, world: WorldModel) -> Optional[FlightCommand]:
+        target = self._find_target(world)
+        if not target:
+            return None
+
+        # Build detection dict from tracked target
+        detection = {
+            'cx': getattr(target, 'bbox_cx', 320),
+            'cy': getattr(target, 'bbox_cy', 240),
+            'w': getattr(target, 'bbox_w', 20),
+            'h': getattr(target, 'bbox_h', 20),
+            'confidence': target.confidence,
+            'class_id': getattr(target, 'class_id', 0),
+            'time': world.timestamp if hasattr(world, 'timestamp') else 0,
+            'vx': getattr(target, 'velocity_px_x', 0),
+            'vy': getattr(target, 'velocity_px_y', 0),
+        }
+
+        cmd = self._guidance.update(detection)
+
+        if cmd.locked:
+            return FlightCommand(
+                command_type="guidance",
+                roll=cmd.roll_cmd,
+                pitch=cmd.pitch_cmd,
+                throttle=cmd.throttle_cmd,
+            )
+        return None
+
+    async def evaluate_transition(self, world: WorldModel) -> Optional[State]:
+        target = self._find_target(world)
+
+        # Target lost
+        if not target:
+            logger.warning("[FSM] Target lost during terminal guidance")
+            self._guidance.release_lock()
+            return SearchLastKnownState()
+
+        # Impact (range < 5m) — mission complete
+        if hasattr(target, 'range_m') and target.range_m and target.range_m < 5:
+            logger.warning("[FSM] *** IMPACT *** Target neutralized")
+            self._guidance.release_lock()
+            return EmergencyLandState()  # or self-destruct
+
+        return None
+
+    def _find_target(self, world: WorldModel):
+        return next(
+            (o for o in world.perception.targets if o.track_id == self.target_id),
+            None
+        )
 
 
 # ─────────────────────────────────────────────
