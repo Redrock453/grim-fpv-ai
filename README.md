@@ -48,3 +48,15 @@ curl -X POST "http://localhost:8000/calculate/flight-time" \
 - `ai_engines/`: Интеграция с Grok, Gemini и Claude.
 - `api/`: FastAPI сервер.
 - `drone_specs/`: Конфигурации дронов в JSON.
+
+## ArduPilot Tweaks (03.04.2026)
+Работаю с ArduPilot на уровне прошивки:
+- Тюнинг PID для FPV в ветре 8–12 м/с (стабильный roll/pitch/yaw без осцилляций).
+- Кастом: автозапуск с GPS-фиксом, RTL в складных условиях, низкая задержка.
+- Тесты: SITL (Gazebo + реальные логи), Pixhawk 6X, 5" FPV-дроны.
+
+Примеры:
+- Лог PID до/после тюнинга:
+- Код: форк ArduPilot с патчами (пока приватно, но готов показать).
+
+Готов к вакансии Rarog — низкий уровень, код, железо, без воды.
