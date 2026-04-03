@@ -116,5 +116,42 @@ async def multi_ai(req: MultiAIRequest):
         return {"status": "partial", "message": "Some AI engines unavailable", "error": str(e)}
 
 
+@app.get("/missions/portfolio")
+async def get_portfolio_missions():
+    from flight_simulator import generate_portfolio_missions
+    from dataclasses import asdict
+    missions = generate_portfolio_missions()
+    return {
+        "total": len(missions),
+        "missions": [
+            {
+                "mission_id": m.mission_id,
+                "type": m.mission_type,
+                "callsign": m.callsign,
+                "duration_sec": m.duration_sec,
+                "distance_m": m.distance_m,
+                "max_alt_m": m.max_alt_m,
+                "max_speed_ms": m.max_speed_ms,
+                "battery_start": m.battery_start_pct,
+                "battery_end": m.battery_end_pct,
+                "status": m.status,
+                "notes": m.notes,
+            }
+            for m in missions
+        ]
+    }
+
+
+@app.get("/missions/{mission_type}/simulate")
+async def simulate_mission(mission_type: str, duration: int = 180, wind: float = 5.0):
+    from flight_simulator import generate_mission
+    from dataclasses import asdict
+    valid_types = ["recon", "intercept", "loiter", "strike", "delivery"]
+    if mission_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid type. Use: {valid_types}")
+    mission = generate_mission(mission_type, duration, wind)
+    return asdict(mission)
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
