@@ -1,7 +1,8 @@
 fastapi
-uvicorn
-requests
-aiohttp
+uvicorn[standard]
 pydantic
 python-dotenv
+aiohttp
+httpx
+requests
 aiosqlite

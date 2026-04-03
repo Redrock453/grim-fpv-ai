@@ -1,58 +1,50 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import uvicorn
 import os
 import sys
 
-# Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from calculators.flight_time_calc import calculate_flight_time
 from calculators.hover_current import calculate_hover_current
 from calculators.rf_link_budget import calculate_path_loss, calculate_link_budget, watts_to_dbm
 from calculators.thermal_rf import calculate_rf_thermal
+from api.models import (
+    FlightTimeRequest, HoverCurrentRequest, RFLinkRequest,
+    RFThermalRequest, ThermalRequest, RangeRequest, PIDRequest, MultiAIRequest
+)
 
-app = FastAPI(title="GRIM-5 FPV & RF Engineering API (Victoria)")
+app = FastAPI(title="GRIM-5 FPV AI Engineering API", version="2.0")
 
-class FlightTimeRequest(BaseModel):
-    battery_wh: float
-    avg_power_watts: float
-    sag_factor: float = 0.85
-
-class HoverCurrentRequest(BaseModel):
-    weight_g: float
-    thrust_kg: float
-    max_current_a: float
-
-class RFLinkRequest(BaseModel):
-    freq_mhz: float
-    distance_km: float
-    tx_power_watts: float
-    tx_gain_dbi: float = 4.0
-    rx_gain_dbi: float = 2.0
-    fade_margin_db: float = 10.0
-
-class RFThermalRequest(BaseModel):
-    p_out_watts: float
-    efficiency: float = 0.4
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "project": "grim-fpv-ai", "lead": "Victoria"}
+    return {"status": "ok", "project": "grim-fpv-ai", "drone": "ГРІМ-5", "version": "2.0"}
+
 
 @app.post("/calculate/flight-time")
 async def get_flight_time(req: FlightTimeRequest):
     try:
         minutes = calculate_flight_time(req.battery_wh, req.avg_power_watts, req.sag_factor)
         return {
-            "flight_time_min": minutes,
-            "params": {
-                "wh": req.battery_wh,
-                "watts": req.avg_power_watts,
-                "sag": req.sag_factor
-            }
+            "flight_time_min": round(minutes, 2),
+            "params": {"wh": req.battery_wh, "watts": req.avg_power_watts, "sag": req.sag_factor}
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/calculate/hover-current")
+async def get_hover_current(req: HoverCurrentRequest):
+    try:
+        current_a = calculate_hover_current(req.weight_g, req.thrust_kg, req.max_current_a)
+        return {
+            "hover_current_a": round(current_a, 2),
+            "params": {"weight": req.weight_g, "thrust": req.thrust_kg, "max_current": req.max_current_a}
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/calculate/rf-link")
 async def get_rf_link(req: RFLinkRequest):
@@ -69,6 +61,7 @@ async def get_rf_link(req: RFLinkRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/calculate/rf-thermal")
 async def get_rf_thermal(req: RFThermalRequest):
     try:
@@ -76,29 +69,52 @@ async def get_rf_thermal(req: RFThermalRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/calculate/hover-current")
-async def get_hover_current(req: HoverCurrentRequest):
+
+@app.post("/calculate/thermal")
+async def get_thermal(req: ThermalRequest):
     try:
-        current_a = calculate_hover_current(req.weight_g, req.thrust_kg, req.max_current_a)
-        return {
-            "hover_current_a": current_a,
-            "params": {
-                "weight": req.weight_g,
-                "thrust": req.thrust_kg,
-                "max_current": req.max_current_a
-            }
-        }
+        from calculators.thermal_analysis import calculate_thermal
+        return calculate_thermal(req.current_a_per_motor, req.ambient_temp_c)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/calculate/range")
+async def get_range(req: RangeRequest):
+    try:
+        from calculators.range_calc import calculate_range
+        return calculate_range(req.tx_power_mw, req.antenna_gain_db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/calculate/pid")
+async def get_pid(req: PIDRequest):
+    try:
+        from calculators.pid_tuning import recommend_pid
+        return recommend_pid(req.kv, req.prop_size, req.weight_g)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/calculate/multi-ai")
-async def multi_ai_check():
-    return {
-        "status": "simulation",
-        "engines": ["grok", "gemini", "claude"],
-        "message": "AI Engines will be integrated in the next update"
-    }
+async def multi_ai(req: MultiAIRequest):
+    import asyncio
+    prompt = f"Расчёт для ГРІМ-5: {req.calculation_type} с параметрами {req.params}"
+    try:
+        from ai_engines.gemini_engine import gemini_calculate
+        from ai_engines.glm_engine import glm_calculate
+        from ai_engines.groq_engine import groq_calculate
+        results = await asyncio.gather(
+            gemini_calculate(prompt),
+            glm_calculate(prompt),
+            groq_calculate(prompt),
+            return_exceptions=True
+        )
+        return {"multi_ai_results": [r if not isinstance(r, Exception) else {"error": str(r)} for r in results]}
+    except Exception as e:
+        return {"status": "partial", "message": "Some AI engines unavailable", "error": str(e)}
+
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
