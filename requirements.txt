@@ -6,3 +6,5 @@ aiohttp
 httpx
 requests
 aiosqlite
+pymavlink
+websockets

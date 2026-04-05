@@ -1,0 +1,44 @@
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git python3 python3-pip python3-setuptools python3-dev \
+    make g++ gcc gawk gfortran \
+    libtool autoconf libexpat1-dev \
+    wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch ArduCopter-4.5.0 \
+    https://github.com/ArduPilot/ardupilot.git /ardupilot
+
+WORKDIR /ardupilot
+
+RUN git submodule update --init --recursive
+
+RUN pip3 install --no-cache-dir -r Tools/environment_install/requirements.txt
+
+RUN ./waf configure --board sitl
+
+RUN ./waf -j$(nproc) copter
+
+# ── runtime ──────────────────────────────────
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/ardupilot/Tools:/ardupilot/build/sitl/bin:$PATH"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-setuptools \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /ardupilot /ardupilot
+
+WORKDIR /ardupilot
+
+RUN pip3 install --no-cache-dir pymavlink
+
+EXPOSE 5760/tcp 14550/udp
+
+CMD ["sh", "-c", "sim_vehicle.py -v ArduCopter -f quad --out tcp:0.0.0.0:5760 --out udp:0.0.0.0:14550 --no-rebuild --no-mavproxy -I0 --bind 0.0.0.0"]

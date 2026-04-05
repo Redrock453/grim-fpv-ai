@@ -1,0 +1,73 @@
+x-sitl-flags: &sitl-flags
+  - --model
+  - quad
+  - --speedup
+  - "1"
+  - --default
+  - --bind
+  - 0.0.0.0
+
+services:
+  sitl:
+    build:
+      context: .
+      dockerfile: Dockerfile.sitl
+    container_name: grim-fpv-sitl
+    command: >
+      sim_vehicle.py
+      -v ArduCopter
+      -f quad
+      --out tcp:0.0.0.0:5760
+      --out udp:0.0.0.0:14550
+      --no-rebuild
+      --no-mavproxy
+      -I0
+    ports:
+      - "5760:5760/tcp"
+      - "14550:14550/udp"
+    restart: unless-stopped
+    networks:
+      - grim-fpv-net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat < /dev/null > /dev/tcp/localhost/5760"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: grim-fpv-api
+    command: >
+      uvicorn api.fastapi_server:app
+      --host 0.0.0.0
+      --port 8000
+    ports:
+      - "8000:8000/tcp"
+    environment:
+      - MAVLINK_URL=tcp://sitl:5760
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    depends_on:
+      sitl:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - grim-fpv-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 4G
+
+networks:
+  grim-fpv-net:
+    driver: bridge

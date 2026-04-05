@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ГРІМ-5 FPV — Панель управління</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-primary: #1a1a2e;
+  --bg-panel: #16213e;
+  --bg-accent: #0f3460;
+  --accent-red: #e94560;
+  --accent-green: #00ff88;
+  --accent-cyan: #00d4ff;
+  --text-primary: #e0e0e0;
+  --text-secondary: #8892a4;
+  --text-bright: #ffffff;
+  --border-color: #0f3460;
+  --font-mono: 'Courier New', Courier, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.header {
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--bg-accent);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  z-index: 1000;
+}
+
+.header-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: 0.5px;
+}
+
+.header-title span {
+  color: var(--accent-red);
+}
+
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  transition: background 0.3s;
+}
+
+.status-dot.connected { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.status-dot.disconnected { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+.status-dot.sitl-connected { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+.status-dot.sitl-disconnected { background: #555; }
+
+/* Main layout */
+.main-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  grid-template-rows: 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Telemetry panel */
+.telemetry-panel {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-color);
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.telemetry-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.telemetry-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0;
+}
+
+.telemetry-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.telemetry-value {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+/* Battery bar */
+.battery-bar-container {
+  width: 100%;
+  background: #0a0a1a;
+  border-radius: 4px;
+  height: 18px;
+  overflow: hidden;
+  margin-top: 0.25rem;
+}
+
+.battery-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s, background 0.4s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #000;
+  min-width: 30px;
+}
+
+.battery-bar.green { background: var(--accent-green); }
+.battery-bar.yellow { background: #ffc107; }
+.battery-bar.red { background: var(--accent-red); color: #fff; }
+
+/* Mission control */
+.mission-section {
+  margin-top: auto;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.75rem;
+}
+
+.mission-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent-red);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.5rem;
+}
+
+.mission-status {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.mission-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mission-btn {
+  background: var(--bg-accent);
+  color: var(--text-bright);
+  border: 1px solid var(--border-color);
+  padding: 0.55rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.mission-btn:hover { background: #1a4a80; border-color: var(--accent-cyan); }
+.mission-btn:active { transform: scale(0.98); }
+.mission-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.mission-btn.stop-btn {
+  background: rgba(233, 69, 96, 0.2);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+  text-align: center;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
+.mission-btn.stop-btn:hover { background: rgba(233, 69, 96, 0.4); }
+
+/* Right side: map + charts */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#map {
+  flex: 1;
+  min-height: 300px;
+  z-index: 1;
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+}
+
+.chart-container {
+  background: var(--bg-primary);
+  border-radius: 6px;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+}
+
+.chart-container canvas {
+  max-height: 180px;
+}
+
+.chart-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Responsive: tablet portrait */
+@media (max-width: 1024px) {
+  .main-layout {
+    grid-template-columns: 280px 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 400px auto;
+  }
+
+  .telemetry-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .telemetry-title {
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .telemetry-row {
+    flex: 1 1 45%;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .battery-row {
+    flex: 1 1 100%;
+  }
+
+  .mission-section {
+    flex: 1 1 100%;
+    margin-top: 0;
+    border-top: none;
+    padding-top: 0;
+  }
+
+  .mission-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .header { padding: 0.5rem 0.75rem; }
+  .header-title { font-size: 1rem; }
+  .status-group { gap: 0.75rem; }
+  .telemetry-row { flex: 1 1 100%; }
+  .mission-buttons { grid-template-columns: 1fr; }
+}
+
+/* Leaflet custom marker */
+.drone-marker-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leaflet-container {
+  background: #0a0a1a !important;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title"><span>ГРІМ-5</span> FPV — Панель управління</div>
+  <div class="status-group">
+    <div class="status-item">
+      <div class="status-dot disconnected" id="ws-dot"></div>
+      <span id="ws-status">WebSocket: відключено</span>
+    </div>
+    <div class="status-item">
+      <div class="status-dot sitl-disconnected" id="sitl-dot"></div>
+      <span id="sitl-status">SITL: не перевірено</span>
+    </div>
+  </div>
+</div>
+
+<div class="main-layout">
+  <div class="telemetry-panel">
+    <div class="telemetry-title">Телеметрія</div>
+
+    <div class="telemetry-row battery-row">
+      <div style="width:100%">
+        <div class="telemetry-row" style="padding:0">
+          <span class="telemetry-label">Батарея</span>
+          <span class="telemetry-value" id="battery-val">— %</span>
+        </div>
+        <div class="battery-bar-container">
+          <div class="battery-bar green" id="battery-bar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Швидкість</span>
+      <span class="telemetry-value" id="speed-val">— m/s</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Висота</span>
+      <span class="telemetry-value" id="alt-val">— m</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">RSSI</span>
+      <span class="telemetry-value" id="rssi-val">— dBm</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Режим</span>
+      <span class="telemetry-value" id="mode-val">—</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Throttle</span>
+      <span class="telemetry-value" id="throttle-val">— %</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Напруга</span>
+      <span class="telemetry-value" id="voltage-val">— V</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Курс</span>
+      <span class="telemetry-value" id="heading-val">— °</span>
+    </div>
+
+    <div class="mission-section">
+      <div class="mission-title">Управління місією</div>
+      <div class="mission-status" id="mission-status">Місія: не активна</div>
+      <div class="mission-buttons">
+        <button class="mission-btn" onclick="startMission('recon')">🔍 Розвідка</button>
+        <button class="mission-btn" onclick="startMission('intercept')">🎯 Перехоплення</button>
+        <button class="mission-btn" onclick="startMission('loiter')">🔄 Барражування</button>
+        <button class="mission-btn" onclick="startMission('strike')">💥 Удар</button>
+        <button class="mission-btn" onclick="startMission('delivery')">📦 Доставка</button>
+        <button class="mission-btn stop-btn" onclick="stopMission()">⛔ СТОП</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-panel">
+    <div id="map"></div>
+    <div class="charts-row">
+      <div class="chart-container">
+        <div class="chart-label">Батарея (%)</div>
+        <canvas id="battery-chart"></canvas>
+      </div>
+      <div class="chart-container">
+        <div class="chart-label">Швидкість (m/s)</div>
+        <canvas id="speed-chart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ===== MAP INITIALIZATION ===== */
+  const map = L.map('map', {
+    zoomControl: true,
+    attributionControl: true
+  }).setView([50.4501, 30.5234], 13);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  const droneIcon = L.divIcon({
+    className: 'drone-marker-icon',
+    html: '<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">' +
+          '<circle cx="18" cy="18" r="16" fill="#0f3460" stroke="#00d4ff" stroke-width="2"/>' +
+          '<polygon points="18,6 22,14 30,18 22,22 18,30 14,22 6,18 14,14" fill="#00ff88" opacity="0.9"/>' +
+          '<circle cx="18" cy="18" r="3" fill="#1a1a2e"/>' +
+          '</svg>',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18]
+  });
+
+  const droneMarker = L.marker([50.4501, 30.5234], { icon: droneIcon }).addTo(map);
+  const flightPath = L.polyline([], {
+    color: '#00d4ff',
+    weight: 3,
+    opacity: 0.8,
+    dashArray: '8, 6'
+  }).addTo(map);
+
+  const trailPath = L.polyline([], {
+    color: '#00ff88',
+    weight: 2,
+    opacity: 0.5
+  }).addTo(map);
+
+  let flightCoords = [];
+
+  /* ===== CHARTS ===== */
+  const chartTimeLabels = [];
+  const batteryData = [];
+  const speedData = [];
+  const MAX_POINTS = 60;
+
+  const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: true,
+    animation: { duration: 300 },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: {
+        ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 6 },
+        grid: { color: 'rgba(15,52,96,0.4)' }
+      },
+      y: {
+        ticks: { color: '#8892a4', font: { size: 10 } },
+        grid: { color: 'rgba(15,52,96,0.4)' },
+        beginAtZero: true
+      }
+    }
+  };
+
+  const batteryChart = new Chart(document.getElementById('battery-chart'), {
+    type: 'line',
+    data: {
+      labels: chartTimeLabels,
+      datasets: [{
+        data: batteryData,
+        borderColor: '#00ff88',
+        backgroundColor: 'rgba(0,255,136,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, max: 100, min: 0 } } }
+  });
+
+  const speedChart = new Chart(document.getElementById('speed-chart'), {
+    type: 'line',
+    data: {
+      labels: chartTimeLabels,
+      datasets: [{
+        data: speedData,
+        borderColor: '#00d4ff',
+        backgroundColor: 'rgba(0,212,255,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: { ...chartDefaults }
+  });
+
+  /* ===== TELEMETRY STATE ===== */
+  let lastChartUpdate = 0;
+  const CHART_INTERVAL = 1000;
+
+  const wsDot = document.getElementById('ws-dot');
+  const wsStatus = document.getElementById('ws-status');
+  const sitlDot = document.getElementById('sitl-dot');
+  const sitlStatus = document.getElementById('sitl-status');
+
+  function setWsStatus(connected) {
+    wsDot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+    wsStatus.textContent = 'WebSocket: ' + (connected ? 'підключено' : 'відключено');
+  }
+
+  function setSitlStatus(connected) {
+    sitlDot.className = 'status-dot ' + (connected ? 'sitl-connected' : 'sitl-disconnected');
+    sitlStatus.textContent = 'SITL: ' + (connected ? 'підключено' : 'недоступно');
+  }
+
+  /* ===== UPDATE UI ===== */
+  function updateTelemetry(data) {
+    const now = Date.now();
+
+    if (data.battery_pct !== undefined) {
+      const pct = Math.round(data.battery_pct);
+      document.getElementById('battery-val').textContent = pct + ' %';
+      const bar = document.getElementById('battery-bar');
+      bar.style.width = pct + '%';
+      bar.textContent = pct + '%';
+      bar.className = 'battery-bar ' + (pct > 50 ? 'green' : pct >= 20 ? 'yellow' : 'red');
+    }
+
+    if (data.speed_ms !== undefined) {
+      const spd = data.speed_ms.toFixed(1);
+      const kmh = (data.speed_ms * 3.6).toFixed(1);
+      document.getElementById('speed-val').textContent = spd + ' m/s (' + kmh + ' km/h)';
+    }
+
+    if (data.alt_m !== undefined) {
+      document.getElementById('alt-val').textContent = data.alt_m.toFixed(1) + ' m';
+    }
+
+    if (data.rssi_dbm !== undefined) {
+      document.getElementById('rssi-val').textContent = data.rssi_dbm.toFixed(0) + ' dBm';
+    }
+
+    if (data.mode !== undefined) {
+      document.getElementById('mode-val').textContent = data.mode;
+    }
+
+    if (data.throttle_pct !== undefined) {
+      document.getElementById('throttle-val').textContent = Math.round(data.throttle_pct) + ' %';
+    }
+
+    if (data.voltage !== undefined) {
+      document.getElementById('voltage-val').textContent = data.voltage.toFixed(1) + ' V';
+    }
+
+    if (data.heading_deg !== undefined) {
+      document.getElementById('heading-val').textContent = Math.round(data.heading_deg) + ' °';
+    }
+
+    if (data.lat !== undefined && data.lon !== undefined) {
+      const lat = data.lat;
+      const lon = data.lon;
+      droneMarker.setLatLng([lat, lon]);
+      map.panTo([lat, lon], { animate: true, duration: 0.3 });
+
+      flightCoords.push([lat, lon]);
+      if (flightCoords.length > 5000) flightCoords = flightCoords.slice(-5000);
+      flightPath.setLatLngs(flightCoords);
+      trailPath.setLatLngs(flightCoords);
+    }
+
+    if (now - lastChartUpdate >= CHART_INTERVAL) {
+      lastChartUpdate = now;
+      const timeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      chartTimeLabels.push(timeStr);
+      batteryData.push(data.battery_pct !== undefined ? data.battery_pct : 0);
+      speedData.push(data.speed_ms !== undefined ? data.speed_ms : 0);
+
+      if (chartTimeLabels.length > MAX_POINTS) {
+        chartTimeLabels.shift();
+        batteryData.shift();
+        speedData.shift();
+      }
+
+      batteryChart.update('none');
+      speedChart.update('none');
+    }
+  }
+
+  /* ===== WEBSOCKET ===== */
+  let ws = null;
+  let reconnectDelay = 1000;
+  const MAX_RECONNECT_DELAY = 30000;
+
+  function connectWs() {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = proto + '//' + window.location.host + '/ws/telemetry';
+
+    ws = new WebSocket(url);
+
+    ws.onopen = function() {
+      setWsStatus(true);
+      reconnectDelay = 1000;
+    };
+
+    ws.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        updateTelemetry(data);
+      } catch (e) {
+        console.error('Failed to parse telemetry:', e);
+      }
+    };
+
+    ws.onclose = function() {
+      setWsStatus(false);
+      scheduleReconnect();
+    };
+
+    ws.onerror = function() {
+      setWsStatus(false);
+    };
+  }
+
+  function scheduleReconnect() {
+    setTimeout(function() {
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      connectWs();
+    }, reconnectDelay);
+  }
+
+  connectWs();
+
+  /* ===== SITL STATUS CHECK ===== */
+  async function checkSitlStatus() {
+    try {
+      const resp = await fetch('/telemetry/latest');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && (data.lat !== undefined || data.speed_ms !== undefined || data.battery_pct !== undefined)) {
+          setSitlStatus(true);
+          updateTelemetry(data);
+        } else {
+          setSitlStatus(false);
+        }
+      } else {
+        setSitlStatus(false);
+      }
+    } catch (e) {
+      setSitlStatus(false);
+    }
+  }
+
+  checkSitlStatus();
+  setInterval(checkSitlStatus, 5000);
+
+  /* ===== MISSION CONTROL ===== */
+  const missionStatusEl = document.getElementById('mission-status');
+  const missionButtons = document.querySelectorAll('.mission-btn:not(.stop-btn)');
+  const stopButton = document.querySelector('.stop-btn');
+
+  function setMissionButtonsEnabled(enabled) {
+    missionButtons.forEach(function(btn) { btn.disabled = !enabled; });
+    stopButton.disabled = !enabled;
+  }
+
+  window.startMission = async function(missionType) {
+    setMissionButtonsEnabled(false);
+    missionStatusEl.textContent = 'Місія: запуск...';
+    try {
+      const resp = await fetch('/mission/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mission_type: missionType })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const names = {
+          recon: 'Розвідка',
+          intercept: 'Перехоплення',
+          loiter: 'Барражування',
+          strike: 'Удар',
+          delivery: 'Доставка'
+        };
+        missionStatusEl.textContent = 'Місія: ' + (names[missionType] || missionType) + ' — активна';
+        missionStatusEl.style.color = '#00ff88';
+      } else {
+        missionStatusEl.textContent = 'Місія: помилка запуску';
+        missionStatusEl.style.color = '#e94560';
+      }
+    } catch (e) {
+      missionStatusEl.textContent = 'Місія: помилка з\'єднання';
+      missionStatusEl.style.color = '#e94560';
+    }
+    setMissionButtonsEnabled(true);
+  };
+
+  window.stopMission = async function() {
+    setMissionButtonsEnabled(false);
+    try {
+      const resp = await fetch('/mission/stop', { method: 'POST' });
+      if (resp.ok) {
+        missionStatusEl.textContent = 'Місія: зупинена';
+        missionStatusEl.style.color = '#e94560';
+      } else {
+        missionStatusEl.textContent = 'Місія: помилка зупинки';
+      }
+    } catch (e) {
+      missionStatusEl.textContent = 'Місія: помилка з\'єднання';
+    }
+    setMissionButtonsEnabled(true);
+  };
+
+  /* ===== RESIZE HANDLER ===== */
+  window.addEventListener('resize', function() {
+    map.invalidateSize();
+  });
+
+})();
+</script>
+</body>
+</html>

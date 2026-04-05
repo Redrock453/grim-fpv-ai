@@ -1,9 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 import sys
 import logging
+import asyncio
+import time
+import random
+import math
+from typing import Dict, List, Optional
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,6 +23,14 @@ from api.models import (
     RFThermalRequest, ThermalRequest, RangeRequest, PIDRequest, MultiAIRequest
 )
 
+try:
+    from pymavlink import mavutil
+    PYMAVLINK_AVAILABLE = True
+except ImportError:
+    PYMAVLINK_AVAILABLE = False
+
+from flight_simulator import generate_mission, BASE_LAT, BASE_LON
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="GRIM-5 FPV AI Engineering API", version="2.0")
@@ -27,6 +42,274 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/dashboard", StaticFiles(directory=_static_dir, html=True), name="static")
+
+# ─────────────────────────────────────────────
+# GLOBAL STATE
+# ─────────────────────────────────────────────
+
+latest_telemetry: Dict = {
+    "timestamp": "",
+    "lat": BASE_LAT,
+    "lon": BASE_LON,
+    "alt_m": 0.0,
+    "speed_ms": 0.0,
+    "heading_deg": 0.0,
+    "battery_pct": 100.0,
+    "voltage": 25.2,
+    "current_a": 0.0,
+    "rssi_dbm": -55.0,
+    "roll": 0.0,
+    "pitch": 0.0,
+    "yaw": 0.0,
+    "throttle_pct": 0.0,
+    "mode": "STANDBY",
+}
+
+sitl_connected: bool = False
+sitl_master = None
+active_mission: Optional[Dict] = None
+websocket_clients: List[WebSocket] = []
+
+# ─────────────────────────────────────────────
+# MAVLink TELEMETRY BACKGROUND TASK
+# ─────────────────────────────────────────────
+
+def _parse_telemetry_from_msg(msg) -> Dict:
+    msg_type = msg.get_type()
+    ts = datetime.utcnow().isoformat()
+
+    if msg_type == "GLOBAL_POSITION_INT":
+        latest_telemetry.update({
+            "timestamp": ts,
+            "lat": msg.lat / 1e7,
+            "lon": msg.lon / 1e7,
+            "alt_m": msg.alt / 1e3,
+            "speed_ms": math.sqrt(msg.vx**2 + msg.vy**2) / 100.0,
+            "heading_deg": (msg.hdg / 100.0) % 360,
+        })
+    elif msg_type == "SYS_STATUS":
+        latest_telemetry.update({
+            "timestamp": ts,
+            "battery_pct": msg.battery_remaining,
+            "voltage": msg.voltage_battery / 1e3,
+            "current_a": msg.current_battery / 100.0,
+        })
+    elif msg_type == "ATTITUDE":
+        latest_telemetry.update({
+            "timestamp": ts,
+            "roll": math.degrees(msg.roll),
+            "pitch": math.degrees(msg.pitch),
+            "yaw": (math.degrees(msg.yaw) % 360),
+        })
+    elif msg_type == "VFR_HUD":
+        latest_telemetry.update({
+            "timestamp": ts,
+            "alt_m": msg.alt,
+            "speed_ms": msg.groundspeed,
+            "throttle_pct": msg.throttle,
+        })
+    elif msg_type == "HEARTBEAT":
+        latest_telemetry["timestamp"] = ts
+        mode_mapping = {
+            0: "MANUAL", 4: "GUIDED", 5: "AUTO", 6: "RTL",
+            9: "LAND", 10: "DRIFT", 15: "STABILIZE", 16: "LOITER",
+        }
+        latest_telemetry["mode"] = mode_mapping.get(msg.custom_mode, f"MODE_{msg.custom_mode}")
+    elif msg_type == "GPS_RAW_INT":
+        latest_telemetry.update({
+            "timestamp": ts,
+            "lat": msg.lat / 1e7,
+            "lon": msg.lon / 1e7,
+            "alt_m": msg.alt / 1e3,
+        })
+    elif msg_type == "SCALED_IMU2":
+        latest_telemetry["timestamp"] = ts
+    elif msg_type == "RADIO_STATUS":
+        latest_telemetry.update({
+            "timestamp": ts,
+            "rssi_dbm": msg.rssi,
+        })
+
+    return latest_telemetry
+
+
+async def mavlink_telemetry_loop():
+    global sitl_connected, sitl_master
+
+    if not PYMAVLINK_AVAILABLE:
+        logger.warning("[MAV] pymavlink not installed, falling back to simulation")
+        return
+
+    while True:
+        try:
+            if not sitl_connected:
+                mavlink_url = os.getenv("MAVLINK_URL", "tcp:localhost:5760")
+                logger.info(f"[MAV] Connecting to SITL on {mavlink_url}")
+                sitl_master = mavutil.mavlink_connection(mavlink_url)
+                await asyncio.sleep(1)
+
+                msg = sitl_master.recv_match(type="HEARTBEAT", blocking=True, timeout=5)
+                if msg:
+                    sitl_connected = True
+                    logger.info("[MAV] Connected to SITL")
+                    _parse_telemetry_from_msg(msg)
+                else:
+                    raise ConnectionError("No heartbeat received")
+
+            while sitl_connected:
+                msg = sitl_master.recv_match(blocking=True, timeout=1)
+                if msg:
+                    _parse_telemetry_from_msg(msg)
+                await asyncio.sleep(0.05)
+
+        except Exception as e:
+            logger.warning(f"[MAV] Connection lost: {e}")
+            sitl_connected = False
+            sitl_master = None
+            await asyncio.sleep(5)
+
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(mavlink_telemetry_loop())
+    logger.info("[API] GRIM-5 FPV AI Engineering API started")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global sitl_connected, sitl_master
+    sitl_connected = False
+    if sitl_master:
+        try:
+            sitl_master.close()
+        except Exception:
+            pass
+    sitl_master = None
+    logger.info("[API] Shutting down")
+
+
+# ─────────────────────────────────────────────
+# SIMULATED TELEMETRY GENERATOR
+# ─────────────────────────────────────────────
+
+_sim_state = {
+    "lat": BASE_LAT,
+    "lon": BASE_LON,
+    "alt_m": 0.0,
+    "speed_ms": 0.0,
+    "heading_deg": 0.0,
+    "battery_pct": 100.0,
+    "voltage": 25.2,
+    "current_a": 0.0,
+    "rssi_dbm": -55.0,
+    "roll": 0.0,
+    "pitch": 0.0,
+    "yaw": 0.0,
+    "throttle_pct": 0.0,
+    "mode": "STANDBY",
+    "phase": "idle",
+    "mission_start": None,
+    "mission_duration": 0,
+}
+
+
+def _generate_sim_telemetry() -> Dict:
+    global _sim_state
+
+    now = datetime.utcnow()
+    ts = now.isoformat()
+
+    if _sim_state["phase"] == "idle":
+        return {
+            "timestamp": ts,
+            "lat": BASE_LAT,
+            "lon": BASE_LON,
+            "alt_m": 0.0,
+            "speed_ms": 0.0,
+            "heading_deg": 0.0,
+            "battery_pct": 100.0,
+            "voltage": 25.2,
+            "current_a": 0.0,
+            "rssi_dbm": -55.0,
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "throttle_pct": 0.0,
+            "mode": "STANDBY",
+        }
+
+    if _sim_state["phase"] == "takeoff":
+        _sim_state["alt_m"] = min(_sim_state["alt_m"] + 2.0, 30.0)
+        _sim_state["throttle_pct"] = 70.0
+        _sim_state["mode"] = "GUIDED"
+        if _sim_state["alt_m"] >= 30.0:
+            _sim_state["phase"] = "mission"
+            _sim_state["mission_start"] = time.time()
+    elif _sim_state["phase"] == "mission":
+        elapsed = time.time() - _sim_state["mission_start"]
+        _sim_state["heading_deg"] = (_sim_state["heading_deg"] + random.uniform(-5, 5)) % 360
+        speed = 15.0 + 5.0 * math.sin(elapsed / 10)
+        _sim_state["speed_ms"] = max(0, speed)
+        _sim_state["alt_m"] = 30.0 + 10.0 * math.sin(elapsed / 20)
+        _sim_state["throttle_pct"] = 50.0 + 10.0 * math.sin(elapsed / 15)
+        _sim_state["battery_pct"] = max(5.0, _sim_state["battery_pct"] - 0.02)
+        _sim_state["mode"] = "AUTO"
+
+        heading_rad = math.radians(_sim_state["heading_deg"])
+        _sim_state["lat"] += speed * math.cos(heading_rad) * 0.000001
+        _sim_state["lon"] += speed * math.sin(heading_rad) * 0.000001
+
+        if _sim_state["battery_pct"] <= 10.0:
+            _sim_state["phase"] = "rtl"
+    elif _sim_state["phase"] == "rtl":
+        _sim_state["mode"] = "RTL"
+        _sim_state["throttle_pct"] = 40.0
+        _sim_state["alt_m"] = max(10.0, _sim_state["alt_m"] - 1.0)
+        _sim_state["speed_ms"] = max(0, _sim_state["speed_ms"] - 0.5)
+        if _sim_state["alt_m"] <= 10.0:
+            _sim_state["phase"] = "land"
+    elif _sim_state["phase"] == "land":
+        _sim_state["mode"] = "LAND"
+        _sim_state["alt_m"] = max(0, _sim_state["alt_m"] - 0.5)
+        _sim_state["throttle_pct"] = 20.0
+        _sim_state["speed_ms"] = max(0, _sim_state["speed_ms"] - 0.3)
+        if _sim_state["alt_m"] <= 0:
+            _sim_state["phase"] = "idle"
+            _sim_state["lat"] = BASE_LAT
+            _sim_state["lon"] = BASE_LON
+
+    _sim_state["roll"] = 10.0 * math.sin(time.time() / 3) + random.uniform(-2, 2)
+    _sim_state["pitch"] = 5.0 * math.sin(time.time() / 5) + random.uniform(-1, 1)
+    _sim_state["yaw"] = _sim_state["heading_deg"] + random.uniform(-3, 3)
+    _sim_state["voltage"] = 21.0 + (25.2 - 21.0) * (_sim_state["battery_pct"] / 100.0)
+    _sim_state["current_a"] = 12.0 * (_sim_state["throttle_pct"] / 50.0)
+    _sim_state["rssi_dbm"] = -55.0 - 20.0 * math.log10(max(0.1, random.uniform(0.5, 2.0))) + random.uniform(-2, 2)
+
+    return {
+        "timestamp": ts,
+        "lat": round(_sim_state["lat"], 6),
+        "lon": round(_sim_state["lon"], 6),
+        "alt_m": round(_sim_state["alt_m"], 1),
+        "speed_ms": round(_sim_state["speed_ms"], 1),
+        "heading_deg": round(_sim_state["heading_deg"], 1),
+        "battery_pct": round(_sim_state["battery_pct"], 1),
+        "voltage": round(_sim_state["voltage"], 2),
+        "current_a": round(_sim_state["current_a"], 1),
+        "rssi_dbm": round(_sim_state["rssi_dbm"], 1),
+        "roll": round(_sim_state["roll"], 1),
+        "pitch": round(_sim_state["pitch"], 1),
+        "yaw": round(_sim_state["yaw"], 1),
+        "throttle_pct": round(_sim_state["throttle_pct"], 1),
+        "mode": _sim_state["mode"],
+    }
+
+
+# ─────────────────────────────────────────────
+# EXISTING ENDPOINTS
+# ─────────────────────────────────────────────
 
 @app.get("/health")
 async def health_check():
@@ -162,6 +445,162 @@ async def simulate_mission(mission_type: str, duration: int = 180, wind: float =
         raise HTTPException(status_code=400, detail=f"Invalid type. Use: {valid_types}")
     mission = generate_mission(mission_type, duration, wind)
     return asdict(mission)
+
+
+# ─────────────────────────────────────────────
+# NEW ENDPOINTS
+# ─────────────────────────────────────────────
+
+@app.get("/simulate/mission")
+async def simulate_mission_get(type: str = "recon", duration: int = 180, wind: float = 5.0):
+    from dataclasses import asdict
+    valid_types = ["recon", "intercept", "loiter", "strike", "delivery"]
+    if type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid type. Use: {valid_types}")
+    mission = generate_mission(type, duration, wind)
+    return asdict(mission)
+
+
+@app.websocket("/ws/telemetry")
+async def websocket_telemetry(websocket: WebSocket):
+    await websocket.accept()
+    websocket_clients.append(websocket)
+    logger.info(f"[WS] Client connected. Total clients: {len(websocket_clients)}")
+
+    try:
+        while True:
+            if sitl_connected and latest_telemetry["timestamp"]:
+                data = dict(latest_telemetry)
+            else:
+                data = _generate_sim_telemetry()
+
+            await websocket.send_json(data)
+            await asyncio.sleep(0.2)
+    except WebSocketDisconnect:
+        logger.info("[WS] Client disconnected")
+    except Exception as e:
+        logger.warning(f"[WS] Error: {e}")
+    finally:
+        if websocket in websocket_clients:
+            websocket_clients.remove(websocket)
+        logger.info(f"[WS] Client removed. Total clients: {len(websocket_clients)}")
+
+
+@app.post("/mission/start")
+async def mission_start(body: Dict = None):
+    global active_mission, _sim_state
+
+    if body is None:
+        body = {}
+
+    mission_type = body.get("mission_type", "recon")
+    valid_types = ["recon", "intercept", "loiter", "strike", "delivery"]
+    if mission_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid type. Use: {valid_types}")
+
+    if sitl_connected and sitl_master:
+        try:
+            sitl_master.mav.command_long_send(
+                sitl_master.target_system,
+                sitl_master.target_component,
+                mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+                0,
+                1,
+                4,
+                0, 0, 0, 0, 0
+            )
+            await asyncio.sleep(0.5)
+
+            sitl_master.mav.command_long_send(
+                sitl_master.target_system,
+                sitl_master.target_component,
+                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                0,
+                1, 0, 0, 0, 0, 0, 0
+            )
+            await asyncio.sleep(0.5)
+
+            sitl_master.mav.command_long_send(
+                sitl_master.target_system,
+                sitl_master.target_component,
+                mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+                0,
+                0, 0, 0, 0, 0, 0, 10.0
+            )
+
+            active_mission = {
+                "mission_type": mission_type,
+                "status": "running",
+                "source": "sitl",
+                "started_at": datetime.utcnow().isoformat(),
+            }
+            return {"status": "success", "message": f"Mission {mission_type} started via SITL", "mission": active_mission}
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"MAVLink command failed: {str(e)}")
+
+    else:
+        _sim_state["phase"] = "takeoff"
+        _sim_state["lat"] = BASE_LAT
+        _sim_state["lon"] = BASE_LON
+        _sim_state["alt_m"] = 0.0
+        _sim_state["speed_ms"] = 0.0
+        _sim_state["heading_deg"] = random.uniform(0, 360)
+        _sim_state["battery_pct"] = 100.0
+        _sim_state["mode"] = "GUIDED"
+
+        mission = generate_mission(mission_type, 180, 5.0)
+        active_mission = {
+            "mission_type": mission_type,
+            "status": "running",
+            "source": "simulator",
+            "started_at": datetime.utcnow().isoformat(),
+            "mission_id": mission.mission_id,
+            "callsign": mission.callsign,
+        }
+        return {"status": "success", "message": f"Mission {mission_type} started in simulation", "mission": active_mission}
+
+
+@app.post("/mission/stop")
+async def mission_stop():
+    global active_mission, _sim_state
+
+    if not active_mission:
+        raise HTTPException(status_code=400, detail="No active mission to stop")
+
+    if active_mission.get("source") == "sitl" and sitl_connected and sitl_master:
+        try:
+            sitl_master.mav.command_long_send(
+                sitl_master.target_system,
+                sitl_master.target_component,
+                mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH,
+                0,
+                0, 0, 0, 0, 0, 0, 0
+            )
+            active_mission["status"] = "rtl"
+            return {"status": "success", "message": "RTL command sent via MAVLink", "mission": active_mission}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"MAVLink RTL failed: {str(e)}")
+    else:
+        _sim_state["phase"] = "rtl"
+        _sim_state["mode"] = "RTL"
+        active_mission["status"] = "rtl"
+        return {"status": "success", "message": "Mission stopped, returning to launch (simulated)", "mission": active_mission}
+
+
+@app.get("/telemetry/latest")
+async def get_latest_telemetry():
+    if sitl_connected and latest_telemetry["timestamp"]:
+        return {"source": "sitl", "connected": True, "telemetry": dict(latest_telemetry)}
+    else:
+        return {"source": "simulator", "connected": False, "telemetry": _generate_sim_telemetry()}
+
+
+@app.get("/mission/status")
+async def get_mission_status():
+    if active_mission:
+        return {"active": True, "mission": active_mission}
+    return {"active": False, "message": "No active mission"}
 
 
 if __name__ == "__main__":
