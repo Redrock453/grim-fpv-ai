@@ -9,7 +9,7 @@ import math
 import random
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
-from typing import List, Optional
+from typing import List
 
 
 @dataclass
@@ -48,9 +48,12 @@ class Mission:
     telemetry: List[dict]
 
 
-# Базовые координаты (пример — тренировочная зона)
+# Базовые координаты (тренировочная зона)
 BASE_LAT = 48.4567
 BASE_LON = 35.0422
+
+# Ограничение зоны полётов (~2 км радиус)
+MAX_ZONE_M = 2000
 
 # Характеристики ГРІМ-5
 GRIM5 = {
@@ -64,7 +67,7 @@ GRIM5 = {
     "hover_current_a": 12,
     "max_current_a": 80,
     "weight_g": 865,
-    "frame": "iFlight XL5 Pro 5\"",
+    "frame": 'iFlight XL5 Pro 5"',
     "motors": "T-Motor U8 Pro 2000KV",
 }
 
@@ -75,9 +78,9 @@ def _voltage_from_pct(pct: float) -> float:
         (GRIM5["battery_full_voltage"] - GRIM5["battery_empty_voltage"]) * (pct / 100)
 
 
-def _simulate_battery_drain(speed_ms: float, throttle_pct: float) -> float:
+def _simulate_battery_drain(throttle_pct: float) -> float:
     """Расход батареи в %/сек в зависимости от throttle"""
-    base_drain = 0.05  # %/сек hover
+    base_drain = 0.05  # %/сек в hover
     load_factor = (throttle_pct / 50) ** 1.5
     return base_drain * load_factor
 
@@ -89,6 +92,25 @@ def _wind_effect(t: float) -> tuple:
     return wind_speed, wind_dir
 
 
+def _clamp_to_zone(lat: float, lon: float) -> tuple:
+    """Ограничение дрона в пределах зоны полётов"""
+    d_lat = (lat - BASE_LAT) * 111000
+    d_lon = (lon - BASE_LON) * 111000 * math.cos(math.radians(BASE_LAT))
+    dist = math.sqrt(d_lat ** 2 + d_lon ** 2)
+    if dist > MAX_ZONE_M:
+        scale = MAX_ZONE_M / dist
+        lat = BASE_LAT + (d_lat * scale) / 111000
+        lon = BASE_LON + (d_lon * scale) / (111000 * math.cos(math.radians(BASE_LAT)))
+    return lat, lon
+
+
+def _dist_between(p1: dict, p2: dict) -> float:
+    """Расстояние между двумя точками телеметрии в метрах"""
+    d_lat = (p2["lat"] - p1["lat"]) * 111000
+    d_lon = (p2["lon"] - p1["lon"]) * 111000 * math.cos(math.radians(BASE_LAT))
+    return math.sqrt(d_lat ** 2 + d_lon ** 2)
+
+
 def generate_mission(
     mission_type: str = "recon",
     duration_sec: int = 180,
@@ -97,38 +119,38 @@ def generate_mission(
 ) -> Mission:
     """Генерация полной миссии с телеметрией"""
 
-    mission_id = f"GRIM5-{datetime.now().strftime('%Y%m%d')}-{random.randint(100,999)}"
+    mission_id = f"GRIM5-{datetime.now().strftime('%Y%m%d')}-{random.randint(100, 999)}"
 
     configs = {
         "recon": {
             "callsign": "HAWK",
             "max_alt": 80,
             "cruise_speed": 15,
-            "notes": "Разведка маршрута, фотографирование объектов"
+            "notes": "Разведка маршрута, фотографирование объектов",
         },
         "intercept": {
             "callsign": "VIPER",
             "max_alt": 50,
             "cruise_speed": 25,
-            "notes": "Перехват и сопровождение цели, высокие нагрузки"
+            "notes": "Перехват и сопровождение цели, высокие нагрузки",
         },
         "loiter": {
             "callsign": "OWL",
             "max_alt": 100,
             "cruise_speed": 10,
-            "notes": "Барражирование над зоной, длительный мониторинг"
+            "notes": "Барражирование над зоной, длительный мониторинг",
         },
         "strike": {
             "callsign": "FALCON",
             "max_alt": 40,
             "cruise_speed": 28,
-            "notes": "Сближение с целью на максимальной скорости, уклонение"
+            "notes": "Сближение с целью на максимальной скорости, уклонение",
         },
         "delivery": {
             "callsign": "PELICAN",
             "max_alt": 60,
             "cruise_speed": 12,
-            "notes": "Доставка груза (500г), возврат на базу"
+            "notes": "Доставка груза (500г), возврат на базу",
         },
     }
 
@@ -145,7 +167,6 @@ def generate_mission(
 
     for i in range(duration_sec):
         t = i
-        phase = "loiter"
 
         # Фазы полёта
         if t < 5:
@@ -174,7 +195,9 @@ def generate_mission(
             orbit_radius = 50
             angle = t * 0.15
             lat = BASE_LAT + orbit_radius * math.cos(angle) / 111000
-            lon = BASE_LON + orbit_radius * math.sin(angle) / (111000 * math.cos(math.radians(BASE_LAT)))
+            lon = BASE_LON + orbit_radius * math.sin(angle) / (
+                111000 * math.cos(math.radians(BASE_LAT))
+            )
             alt = cfg["max_alt"] + 5 * math.sin(t / 20)
             speed = cfg["cruise_speed"] * 0.6
             throttle = 40 + random.uniform(-3, 3)
@@ -204,53 +227,61 @@ def generate_mission(
         wind_speed, wind_dir = _wind_effect(t)
         wind_drift = wind_speed * 0.1 * math.sin(math.radians(heading - wind_dir))
 
-        # Обновление позиции
-        if phase not in ["orbit"]:
+        # Обновление позиции (не для orbit — там уже считается выше)
+        if phase != "orbit":
             lat += (speed * math.cos(math.radians(heading)) + wind_drift * 0.5) / 111000
-            lon += (speed * math.sin(math.radians(heading)) + wind_drift * 0.3) / \
-                (111000 * math.cos(math.radians(BASE_LAT)))
+            lon += (speed * math.sin(math.radians(heading)) + wind_drift * 0.3) / (
+                111000 * math.cos(math.radians(BASE_LAT))
+            )
             heading = (heading + 3 * math.sin(t / 12) + random.uniform(-2, 2)) % 360
+            # FIX: ограничение зоны полётов
+            lat, lon = _clamp_to_zone(lat, lon)
 
-        # Телеметрия
-        alt += random.uniform(-1.5, 1.5)
-        speed = max(0, speed + random.uniform(-1, 1))
+        # Шум сенсоров
+        alt_noisy = round(alt + random.uniform(-1.5, 1.5), 1)
+        speed_noisy = round(max(0.0, speed + random.uniform(-1, 1)), 1)
         current = GRIM5["hover_current_a"] * (throttle / 45)
-        rssi = -55 - 20 * math.log10(max(0.1, total_distance / 100 + 0.5)) + random.uniform(-3, 3)
+        rssi = (
+            -55
+            - 20 * math.log10(max(0.1, total_distance / 100 + 0.5))
+            + random.uniform(-3, 3)
+        )
 
-        roll = 15 * math.sin(t / 8) + random.uniform(-3, 3)
-        pitch = 8 * math.sin(t / 12) + random.uniform(-2, 2)
-        yaw = heading + random.uniform(-5, 5)
+        roll = round(15 * math.sin(t / 8) + random.uniform(-3, 3), 1)
+        pitch = round(8 * math.sin(t / 12) + random.uniform(-2, 2), 1)
+        yaw = round((heading + random.uniform(-5, 5)) % 360, 1)
 
-        battery_pct -= _simulate_battery_drain(speed, throttle)
-        battery_pct = max(0, battery_pct)
+        # FIX: убрали неиспользуемый параметр speed из drain
+        battery_pct -= _simulate_battery_drain(throttle)
+        battery_pct = max(0.0, battery_pct)
 
         point = TelemetryPoint(
             timestamp=(start_time + timedelta(seconds=t)).isoformat(),
             lat=round(lat, 6),
             lon=round(lon, 6),
-            alt_m=round(alt, 1),
-            speed_ms=round(speed, 1),
+            alt_m=alt_noisy,
+            speed_ms=speed_noisy,
             heading_deg=round(heading, 1),
             battery_pct=round(battery_pct, 1),
             voltage=round(_voltage_from_pct(battery_pct), 2),
             current_a=round(current, 1),
             rssi_dbm=round(rssi, 1),
-            roll=round(roll, 1),
-            pitch=round(pitch, 1),
-            yaw=round(yaw, 1),
+            roll=roll,
+            pitch=pitch,
+            yaw=yaw,
             throttle_pct=round(throttle, 1),
-            mode=phase
+            mode=phase,
         )
 
-        telemetry.append(asdict(point))
+        point_dict = asdict(point)
+        telemetry.append(point_dict)
 
-        if i > 0:
-            d_lat = telemetry[-1]["lat"] - telemetry[-2]["lat"]
-            d_lon = telemetry[-1]["lon"] - telemetry[-2]["lon"]
-            total_distance += math.sqrt((d_lat * 111000) ** 2 + (d_lon * 111000) ** 2)
+        # FIX: считаем дистанцию с первого шага корректно
+        if len(telemetry) >= 2:
+            total_distance += _dist_between(telemetry[-2], telemetry[-1])
 
-        max_alt = max(max_alt, alt)
-        max_speed = max(max_speed, speed)
+        max_alt = max(max_alt, alt_noisy)
+        max_speed = max(max_speed, speed_noisy)
 
         if battery_pct <= 5:
             break
@@ -268,7 +299,7 @@ def generate_mission(
         battery_end_pct=round(battery_pct, 1),
         status="completed" if battery_pct > 10 else "rtl",
         notes=cfg["notes"],
-        telemetry=telemetry
+        telemetry=telemetry,
     )
 
 
@@ -281,31 +312,32 @@ def generate_mission_report(mission: Mission) -> str:
     max_current = max(t["current_a"] for t in m.telemetry)
     avg_throttle = sum(t["throttle_pct"] for t in m.telemetry) / len(m.telemetry)
 
+    # FIX: было :.1 без f — неправильный форматтер
     report = f"""
 {'='*60}
   ОТЧЁТ МИССИИ: {m.mission_id}
   Тип: {m.mission_type.upper()} | Позывной: {m.callsign}
 {'='*60}
 
-  ВРЕМЯ:          {m.start_time}
-  ДЛИТЕЛЬНОСТЬ:   {m.duration_sec} сек ({m.duration_sec/60:.1f} мин)
-  ДИСТАНЦИЯ:      {m.distance_m:.0f} м ({m.distance_m/1000:.2f} км)
-  МАКС. ВЫСОТА:   {m.max_alt_m:.1f} м
-  МАКС. СКОРОСТЬ:  {m.max_speed_ms:.1} м/с ({m.max_speed_ms*3.6:.0f} км/ч)
-  СРЕДН. СКОРОСТЬ: {avg_speed:.1f} м/с ({avg_speed*3.6:.0f} км/ч)
-  СРЕДН. ВЫСОТА:  {avg_alt:.1f} м
-  МАКС. ТОК:      {max_current:.1f} A
+  ВРЕМЯ:           {m.start_time}
+  ДЛИТЕЛЬНОСТЬ:    {m.duration_sec} сек ({m.duration_sec / 60:.1f} мин)
+  ДИСТАНЦИЯ:       {m.distance_m:.0f} м ({m.distance_m / 1000:.2f} км)
+  МАКС. ВЫСОТА:    {m.max_alt_m:.1f} м
+  МАКС. СКОРОСТЬ:  {m.max_speed_ms:.1f} м/с ({m.max_speed_ms * 3.6:.0f} км/ч)
+  СРЕДН. СКОРОСТЬ: {avg_speed:.1f} м/с ({avg_speed * 3.6:.0f} км/ч)
+  СРЕДН. ВЫСОТА:   {avg_alt:.1f} м
+  МАКС. ТОК:       {max_current:.1f} A
 
-  БАТАРЕЯ:        {m.battery_start_pct:.0f}% → {m.battery_end_pct:.1f}%
-  РАСХОД:         {m.battery_start_pct - m.battery_end_pct:.1f}%
+  БАТАРЕЯ:         {m.battery_start_pct:.0f}% → {m.battery_end_pct:.1f}%
+  РАСХОД:          {m.battery_start_pct - m.battery_end_pct:.1f}%
   СРЕДН. THROTTLE: {avg_throttle:.1f}%
 
   RF:
-  МИН. RSSI:      {min_rssi:.1f} dBm
-  СТАТУС СВЯЗИ:   {'STABLE' if min_rssi > -85 else 'MARGINAL'}
+  МИН. RSSI:       {min_rssi:.1f} dBm
+  СТАТУС СВЯЗИ:    {'STABLE' if min_rssi > -85 else 'MARGINAL'}
 
-  СТАТУС МИССИИ:  {m.status.upper()}
-  ЗАМЕТКИ:        {m.notes}
+  СТАТУС МИССИИ:   {m.status.upper()}
+  ЗАМЕТКИ:         {m.notes}
 
 {'='*60}
   ДРОН: ГРІМ-5 | {GRIM5['frame']} | {GRIM5['motors']}
@@ -317,33 +349,27 @@ def generate_mission_report(mission: Mission) -> str:
 
 def generate_portfolio_missions() -> List[Mission]:
     """Генерация набора миссий для портфолио/резюме"""
-    missions = []
     scenarios = [
-        ("recon", 180, 3.0),
+        ("recon",     180, 3.0),
         ("intercept", 120, 6.0),
-        ("loiter", 300, 4.0),
-        ("strike", 90, 7.0),
-        ("delivery", 240, 2.0),
-        ("recon", 150, 8.0),  # ветер сильный
+        ("loiter",    300, 4.0),
+        ("strike",     90, 7.0),
+        ("delivery",  240, 2.0),
+        ("recon",     150, 8.0),
         ("intercept", 100, 5.0),
-        ("loiter", 360, 1.0),
+        ("loiter",    360, 1.0),
     ]
-
-    for mtype, dur, wind in scenarios:
-        missions.append(generate_mission(mtype, dur, wind))
-
-    return missions
+    return [generate_mission(mtype, dur, wind) for mtype, dur, wind in scenarios]
 
 
 if __name__ == "__main__":
-    # Демо: генерация миссий и отчётов
     print("ГРІМ-5 Flight Simulator — Portfolio Mode\n")
 
     missions = generate_portfolio_missions()
     for m in missions:
         print(generate_mission_report(m))
 
-    # Сохранить JSON для API
-    with open("mission_data.json", "w") as f:
+    with open("mission_data.json", "w", encoding="utf-8") as f:
         json.dump([asdict(m) for m in missions], f, indent=2, ensure_ascii=False)
+
     print(f"\nSaved {len(missions)} missions to mission_data.json")
