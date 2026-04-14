@@ -12,6 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sitl
+    image: grim-fpv-ai-sitl:latest
     container_name: grim-fpv-sitl
     command: >
       sim_vehicle.py
@@ -28,12 +29,6 @@ services:
     restart: unless-stopped
     networks:
       - grim-fpv-net
-    healthcheck:
-      test: ["CMD", "bash", "-c", "cat < /dev/null > /dev/tcp/localhost/5760"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
     deploy:
       resources:
         limits:
@@ -52,13 +47,13 @@ services:
     ports:
       - "8000:8000/tcp"
     environment:
-      - MAVLINK_URL=tcp://sitl:5760
+      - MAVLINK_URL=tcp:sitl:5760
       - PYTHONUNBUFFERED=1
     env_file:
       - .env
     depends_on:
       sitl:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     networks:
       - grim-fpv-net
