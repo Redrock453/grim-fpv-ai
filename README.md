@@ -1,86 +1,86 @@
+```markdown
 # GRIM-FPV-AI
 
-**AI-powered FPV engineering platform для боевого дрона ГРІМ-5**
+**AI-платформа для бойових FPV-дронів**
 
-FPV AI Engineering Agent с полным стеком расчётов, multi-AI интеграцией и эмуляцией боевых миссий.
+Інтелектуальний інженерний агент для дрона **ГРІМ-5**.  
+Повний стек розрахунків, мульти-AI інтеграція та симуляція бойових місій.
 
-## Спецификация ГРІМ-5
-
-| Параметр | Значение |
-|----------|----------|
-| Рама | iFlight XL5 Pro, 5" |
-| Моторы | T-Motor U8 Pro 2000KV |
-| ESC | 40A BLheli_32 (6S) |
-| Вес | ~865г AUW |
-| Батарея | 6S 850mAh 75C (18.87Wh) |
-| Тяга | ~4.2кг (TWR 4.86) |
-| Пропы | 5045 Carbon |
-| VTX | TBS Unify Pro32 (600mW) |
-| Приёмник | ExpressLRS 2.4GHz, 500mW + Crossfire Nano RX |
-| Антенна TX | Lollipop 5.8GHz 4dBic |
-| FC | SpeedyBee F405 V4 / Pixhawk 6X (STM32H743) |
-| GPS | UBLOX M9N (dual antenna) |
-| Rangefinder | Benewake TF02 Pro (LiDAR 40m) |
+### Призначення
+- Швидкі інженерні розрахунки параметрів дрона
+- Симуляція та аналіз бойових завдань
+- Моніторинг телеметрії у реальному часі
+- Підтримка прийняття рішень у польових умовах
 
 ---
 
-## Docker Deployment (VPS Ubuntu 2 CPU 8GB RAM)
+### Специфікація ГРІМ-5
+
+| Параметр     | Значення                              |
+|--------------|---------------------------------------|
+| Рама         | iFlight XL5 Pro, 5"                   |
+| Мотори       | T-Motor U8 Pro 2000KV                 |
+| ESC          | 40A BLHeli_32 (6S)                    |
+| Вага         | ~865 г AUW                            |
+| Батарея      | 6S 850mAh 75C (18.87 Вт·год)          |
+| Тяга         | ~4.2 кг (TWR 4.86)                    |
+| Пропелери    | 5045 Carbon                           |
+| VTX          | TBS Unify Pro32 600 мВт               |
+| Зв'язок      | ExpressLRS 2.4GHz 500мВт + Crossfire  |
+| Антена TX    | Lollipop 5.8GHz 4dBic                 |
+| FC           | SpeedyBee F405 V4 / Pixhawk 6X        |
+| GPS          | UBLOX M9N (dual antenna)              |
+| Далекомір    | Benewake TF02 Pro LiDAR 40м           |
+
+---
+
+### Швидкий запуск (Docker, VPS Ubuntu 2CPU/8GB)
 
 ```bash
-# Clone and deploy
 git clone https://github.com/Redrock453/grim-fpv-ai.git
 cd grim-fpv-ai
 cp .env.example .env
 docker-compose up -d
 ```
 
-This starts two containers:
-- **SITL** — ArduPilot ArduCopter simulation (ArduCopter-4.5.0)
-- **API** — FastAPI server with MAVLink telemetry, WebSocket, web dashboard
+Запускає два контейнери:
+- **SITL** — симуляція ArduPilot ArduCopter 4.5.0
+- **API** — FastAPI + MAVLink телеметрія + WebSocket + веб-дашборд
 
-### Ports
+#### Порти
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 5760 | TCP | MAVLink TCP (SITL ↔ FastAPI) |
-| 14550 | UDP | MAVLink UDP (QGroundControl) |
-| 8000 | TCP | FastAPI + Web Dashboard |
+| Порт  | Протокол | Призначення                        |
+|-------|----------|------------------------------------|
+| 5760  | TCP      | MAVLink TCP (SITL ↔ FastAPI)       |
+| 14550 | UDP      | MAVLink UDP (QGroundControl)       |
+| 8000  | TCP      | FastAPI + Web Dashboard            |
 
-### Services
-
-- **Web Dashboard:** `http://VPS_IP:8000/dashboard/`
-- **API Docs:** `http://VPS_IP:8000/docs`
+- **Веб-дашборд:** `http://VPS_IP:8000`
+- **Документація API:** `http://VPS_IP:8000/docs`
 - **QGroundControl:** `udp://VPS_IP:14550`
 
 ---
 
-## QGroundControl on Android
+### QGroundControl на Android
 
-1. Download QGroundControl APK: https://github.com/mavlink/QGroundControl/releases
-2. Install on your Android tablet
-3. Open QGroundControl → Settings → Comm Links
-4. Add new UDP connection:
-   - Type: UDP
-   - Host: VPS_IP_ADDRESS
-   - Port: 14550
-5. Connect — you should see the simulated ArduCopter on the map
-
-The SITL instance streams MAVLink data to UDP 14550, which QGC reads as if it were a real drone.
+1. Завантажити APK: https://github.com/mavlink/QGroundControl/releases
+2. Встановити на планшет
+3. QGroundControl → Settings → Comm Links → New
+4. Тип: UDP, Host: `VPS_IP`, Port: `14550`
+5. Connect — симульований ArduCopter з'явиться на карті
 
 ---
 
-## Web Dashboard
+### Веб-дашборд
 
-Open `http://VPS_IP:8000` in any browser (tablet recommended):
-
-- Live Leaflet.js map with drone position
-- Telemetry panel: battery, speed, altitude, RSSI, mode, throttle
-- Real-time Chart.js graphs (battery & speed)
-- Mission control buttons: Recon, Intercept, Loiter, Strike, Delivery, Stop
+- Карта Leaflet.js з позицією дрона в реальному часі
+- Телеметрія: батарея, швидкість, висота, RSSI, режим, газ
+- Графіки Chart.js (батарея та швидкість)
+- Кнопки місій: Розвідка, Перехват, Loiter, Удар, Доставка, Стоп
 
 ---
 
-## Architecture
+### Архітектура
 
 ```
 ┌─────────────┐     TCP 5760      ┌──────────────┐
@@ -89,7 +89,7 @@ Open `http://VPS_IP:8000` in any browser (tablet recommended):
 │  (Copter)   │    MAVLink        │   (Python)   │
 └──────┬──────┘                   └──────┬───────┘
        │                                 │
-  UDP  │ 14550                     WebSocket│
+  UDP  │ 14550                    WebSocket│
        │                                 │
 ┌──────▼──────┐                   ┌──────▼───────┐
 │ QGroundCtrl │                   │  Browser     │
@@ -99,52 +99,33 @@ Open `http://VPS_IP:8000` in any browser (tablet recommended):
 
 ---
 
-## Эндпоинты API
+### API Ендпоінти
 
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| GET | `/health` | Статус системы |
-| POST | `/calculate/flight-time` | Расчёт времени полёта |
-| POST | `/calculate/hover-current` | Ток в висении |
-| POST | `/calculate/rf-link` | RF link budget |
-| POST | `/calculate/rf-thermal` | Тепловой расчёт TX |
-| POST | `/calculate/thermal` | Полный тепловой анализ |
-| POST | `/calculate/range` | Дальность связи |
-| POST | `/calculate/pid` | Рекомендации PID |
-| POST | `/calculate/multi-ai` | Multi-AI анализ (Gemini + GLM + Groq) |
-| GET | `/missions/portfolio` | Портфолио миссий |
-| GET | `/missions/{type}/simulate` | Симуляция миссии |
-| GET | `/simulate/mission?type=recon` | Симуляция миссии (новый) |
-| WS | `/ws/telemetry` | WebSocket стрим телеметрии |
-| POST | `/mission/start` | Запуск миссии (SITL или симуляция) |
-| POST | `/mission/stop` | Остановка миссии (RTL) |
-| GET | `/telemetry/latest` | Последняя телеметрия |
-| GET | `/mission/status` | Статус текущей миссии |
-
----
-
-## Установка (локальная)
-
-```bash
-git clone https://github.com/Redrock453/grim-fpv-ai.git
-cd grim-fpv-ai
-pip install -r requirements.txt
-cp .env.example .env
-# Добавьте API ключи: GEMINI_API_KEY, GLM_API_KEY, GROQ_API_KEY
-```
-
-## Запуск (локальный)
-
-```bash
-python -m uvicorn api.fastapi_server:app --host 0.0.0.0 --port 8000 --reload
-```
+| Method | Endpoint                        | Опис                              |
+|--------|---------------------------------|-----------------------------------|
+| GET    | `/health`                       | Статус системи                    |
+| POST   | `/calculate/flight-time`        | Розрахунок часу польоту           |
+| POST   | `/calculate/hover-current`      | Струм у висінні                   |
+| POST   | `/calculate/rf-link`            | RF link budget                    |
+| POST   | `/calculate/rf-thermal`         | Тепловий розрахунок TX            |
+| POST   | `/calculate/thermal`            | Повний тепловий аналіз            |
+| POST   | `/calculate/range`              | Дальність зв'язку                 |
+| POST   | `/calculate/pid`                | Рекомендації PID                  |
+| POST   | `/calculate/multi-ai`           | Мульти-AI аналіз                  |
+| GET    | `/missions/portfolio`           | Портфоліо місій                   |
+| GET    | `/missions/{type}/simulate`     | Симуляція місії                   |
+| GET    | `/simulate/mission?type=recon`  | Симуляція місії (новий)           |
+| WS     | `/ws/telemetry`                 | WebSocket стрім телеметрії        |
+| POST   | `/mission/start`                | Запуск місії (SITL або симуляція) |
+| POST   | `/mission/stop`                 | Зупинка місії (RTL)               |
+| GET    | `/telemetry/latest`             | Остання телеметрія                |
 
 ---
 
-## Примеры запросов
+### Приклади запитів
 
 ```bash
-# Время полёта
+# Час польоту
 curl -X POST "http://localhost:8000/calculate/flight-time" \
      -H "Content-Type: application/json" \
      -d '{"battery_wh": 18.87, "avg_power_watts": 150}'
@@ -154,12 +135,12 @@ curl -X POST "http://localhost:8000/calculate/rf-link" \
      -H "Content-Type: application/json" \
      -d '{"freq_mhz": 5800, "distance_km": 2.5, "tx_power_watts": 0.6}'
 
-# Тепловой анализ TX
+# Тепловий аналіз TX
 curl -X POST "http://localhost:8000/calculate/rf-thermal" \
      -H "Content-Type: application/json" \
      -d '{"p_out_watts": 0.6, "efficiency": 0.35}'
 
-# PID рекомендации
+# Рекомендації PID
 curl -X POST "http://localhost:8000/calculate/pid" \
      -H "Content-Type: application/json" \
      -d '{"kv": 2000, "prop_size": "5045", "weight_g": 865}'
@@ -167,71 +148,71 @@ curl -X POST "http://localhost:8000/calculate/pid" \
 
 ---
 
-## Структура проекта
+### ArduPilot / PID-тюнінг (5" FPV, вітер 8–12 м/с)
+
+| Параметр    | Stock  | Tuned  |
+|-------------|--------|--------|
+| Rate P      | 0.15   | 0.135  |
+| Rate I      | 0.02   | 0.018  |
+| Rate D      | 0.005  | 0.0045 |
+| FLTT/FLTD   | —      | 15Hz   |
+| Roll у вітер| ±8–15° | ±2–5°  |
+
+```bash
+python ardupilot/grim5_tuning.py --sitl            # генерація sweep-плану
+python ardupilot/grim5_tuning.py --analyze logs/flight.bin  # аналіз тюну
+```
+
+---
+
+### AI-двигуни
+
+| Двигун  | Провайдер  | Модель           | Призначення                    |
+|---------|------------|------------------|--------------------------------|
+| Groq    | groq.com   | llama-3.3-70b    | Швидкі розрахунки              |
+| Gemini  | Google AI  | gemini-2.0-flash | Глибокий аналіз, multimodal    |
+| GLM     | z.ai       | glm-5.1          | Основна логіка, кодинг         |
+| Grok    | xAI        | grok-2           | Альтернативний аналіз          |
+| Claude  | Anthropic  | claude-sonnet    | Векторний аналіз, архітектура  |
+
+---
+
+### Структура проєкту
 
 ```
 grim-fpv-ai/
-├── ai_engines/          # AI движки (Groq, Gemini, Claude, GLM)
-├── api/                 # FastAPI сервер + модели
-│   ├── fastapi_server.py    # Основной сервер (обновлён)
-│   ├── models.py            # Pydantic модели
-│   └── static/              # Веб-дашборд (новый)
-│       └── index.html       # Leaflet + Chart.js + WebSocket
-├── ardupilot/           # PID тюнер для SITL + кастомные режимы
-├── calculators/         # Математические модули (7 калькуляторов)
+├── ai_engines/          # Інтеграція LLM (Groq, Gemini, GLM, Claude)
+├── api/                 # FastAPI сервер + Pydantic моделі
+│   └── static/          # Веб-дашборд (Leaflet + Chart.js + WebSocket)
+├── ardupilot/           # SITL, PID-тюнер, кастомні режими
+├── calculators/         # 7 математичних модулів
 ├── core/                # MAVLink, state machine, world model
-├── drone_specs/         # Конфигурации дронов (JSON)
-├── prompts/             # System prompts для AI
-├── slam/                # OpenVINS интеграция
-├── ai/                  # YOLOv8 detector + ByteTrack
-├── tests/               # Тесты
-├── utils/               # Утилиты, config, DB
-├── docker-compose.yml   # Docker: SITL + FastAPI (новый)
-├── Dockerfile.sitl      # ArduPilot SITL образ (новый)
-├── Dockerfile.api       # FastAPI образ (новый)
-└── flight_simulator.py  # Эмулятор боевых миссий
+├── drone_specs/         # Конфігурації дронів (JSON)
+├── prompts/             # Системні промпти для AI
+├── slam/                # OpenVINS інтеграція
+├── ai/                  # YOLOv8 детектор + ByteTrack
+├── tests/               # Тести
+├── utils/               # Утиліти, config, DB
+├── docker-compose.yml
+├── Dockerfile.sitl
+├── Dockerfile.api
+└── flight_simulator.py  # Емулятор бойових місій
 ```
 
 ---
 
-## ArduPilot Tweaks
-
-### PID-тюнинг (5" FPV, ветер 8-12 м/с)
-
-| Параметр | Stock | Tuned |
-|----------|-------|-------|
-| Rate P | 0.15 | 0.135 |
-| Rate I | 0.02 | 0.018 |
-| Rate D | 0.005 | 0.0045 |
-| FLTT/FLTD | — | 15Hz |
-| Roll в ветер | ±8-15° | ±2-5° |
-
-### SITL Auto-Tuner
+### Локальна установка
 
 ```bash
-python ardupilot/grim5_tuning.py --sitrl   # generate sweep plan
-python ardupilot/grim5_tuning.py --analyze logs/flight.bin  # score tune
+pip install -r requirements.txt
+cp .env.example .env
+# Додати ключі: GEMINI_API_KEY, GLM_API_KEY, GROQ_API_KEY
+python -m uvicorn api.fastapi_server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ---
 
-## AI Engines
-
-| Engine | Провайдер | Модель | Назначение |
-|--------|-----------|--------|------------|
-| Groq | groq.com | llama-3.3-70b | Быстрый inference, простые расчёты |
-| Gemini | Google AI | gemini-2.0-flash | Глубокий анализ, multimodal |
-| GLM | z.ai прокси | glm-5.1 | Основная модель, кодинг |
-| Grok | xAI | grok-2 | Альтернативный анализ |
-| Claude | Anthropic | claude-sonnet | Векторный анализ, архитектура |
-
-- **Groq** — быстрые инференсы (Llama-3, Mixtral)
-- **Gemini** — глубокий анализ (Google AI)
-- **GLM** — через z.ai прокси
-- **Claude** — Anthropic (векторный анализ)
-
----
-
-## Лицензия
+### Ліцензія
 
 MIT
+```
